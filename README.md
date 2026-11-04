@@ -15,6 +15,18 @@ conda activate image-vault
 python vault.py --help
 ```
 
+## Standalone utility
+
+Copy `decrypter.py` to the target machine. No other project files are needed.
+Requires Python 3.9+ and the following packages (Conda is optional there):
+
+```sh
+python -m pip install Pillow cryptography
+python decrypter.py input.png output.bin
+```
+
+The passphrase is prompted interactively. Existing output files are preserved.
+
 ## Tests
 
 ```sh

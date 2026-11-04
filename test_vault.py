@@ -1,12 +1,38 @@
 import os
 from pathlib import Path
 import tempfile
+import shutil
+import subprocess
+import sys
 import unittest
 from PIL import Image
 from vault import encode, decode
 
 
 class VaultTests(unittest.TestCase):
+    def test_standalone_from_separate_folder(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            shutil.copy(Path(__file__).with_name('decrypter.py'), root)
+            cover, source = root / 'cover.png', root / 'original.bin'
+            Image.new('RGB', (128, 128), (100, 170, 240)).save(cover)
+            for data in (b'', os.urandom(1024)):
+                source.write_bytes(data)
+                hidden, output = root / 'input.png', root / 'output.bin'
+                encode(source, cover, hidden, 'test passphrase')
+                for password, expected in [('wrong', 1), ('test passphrase', 0), ('test passphrase', 1)]:
+                    result = subprocess.run(
+                        [sys.executable, '-I', 'decrypter.py', 'input.png', 'output.bin'],
+                        cwd=root, input=password + '\n', text=True, capture_output=True,
+                    )
+                    self.assertEqual(result.returncode, expected, result.stderr)
+                    if output.exists():
+                        self.assertEqual(output.read_bytes(), data)
+                    else:
+                        self.assertEqual(expected, 1)
+                hidden.unlink()
+                output.unlink()
+
     def test_roundtrip_and_rejections(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
