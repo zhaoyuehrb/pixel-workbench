@@ -1,0 +1,23 @@
+# Local environments and caches
+.venv/
+.env
+.env.*
+__pycache__/
+*.pyc
+.DS_Store
+
+# Personal inputs and generated outputs
+examples/
+*.jpg
+*.jpeg
+*.png
+*.webp
+*.heic
+*.tif
+*.tiff
+*.mp4
+*.mov
+*.mkv
+*.avi
+*.zip
+*.pdf
