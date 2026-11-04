@@ -15,6 +15,15 @@ conda activate image-vault
 python vault.py --help
 ```
 
+## Image presets
+
+See [the size guide](covers/README.md) for dimensions and limits.
+
+```sh
+python covers.py download
+python covers.py plan /path/to/input.mp4
+```
+
 ## Standalone utility
 
 Copy `decrypter.py` to the target machine. No other project files are needed.

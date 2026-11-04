@@ -1,0 +1,23 @@
+[
+  {
+    "name": "alpine-lake",
+    "author": "Dominik Perau",
+    "page": "https://www.pexels.com/photo/beautiful-landscape-of-a-mountain-lake-12699620/",
+    "photo_id": "12699620",
+    "license": "https://www.pexels.com/license/"
+  },
+  {
+    "name": "mountain-reflection",
+    "author": "Bri Schneiter",
+    "page": "https://www.pexels.com/photo/calm-body-of-lake-between-mountains-346529/",
+    "photo_id": "346529",
+    "license": "https://www.pexels.com/license/"
+  },
+  {
+    "name": "interlaken",
+    "author": "R. Fera",
+    "page": "https://www.pexels.com/photo/scenic-view-of-lake-during-daytime-2618992/",
+    "photo_id": "2618992",
+    "license": "https://www.pexels.com/license/"
+  }
+]
