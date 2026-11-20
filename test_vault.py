@@ -13,7 +13,7 @@ from PIL import Image
 import vault
 
 
-class PayloadTests(unittest.TestCase):
+class FileTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
@@ -71,7 +71,7 @@ class PayloadTests(unittest.TestCase):
             vault.encode(self.source, self.cover, self.hidden, '')
         self.assertFalse(self.hidden.exists())
 
-    def test_tampering_cover_ciphertext_tag_and_footer(self):
+    def test_modified_input_rejected(self):
         self.encode()
         original = self.hidden.read_bytes()
         positions = (0, self.cover.stat().st_size, len(original) - vault.FOOTER.size - 1,
@@ -167,7 +167,7 @@ class PayloadTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'truncated'):
             list(vault.chunks(io.BytesIO(b'short'), 100))
 
-    def test_randomized_encryption(self):
+    def test_randomized_output(self):
         self.encode()
         first = self.hidden.read_bytes()
         self.hidden.unlink()

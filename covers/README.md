@@ -10,10 +10,10 @@ Three 1920 × 1080 JPEG landscape wallpapers are included in this branch:
 
 Downloaded and cropped through the Pexels image CDN. See the [Pexels license](https://www.pexels.com/license/), `sources.json` for exact download URLs, and `catalog.csv` for dimensions and file sizes. These are sample covers for the utility.
 
+To restore missing samples:
+
 ```sh
 python covers.py download
-python vault.py encode /path/to/input.bin covers/alpine-lake.jpg packed.jpg
-python vault.py decode packed.jpg recovered.bin
 ```
 
-The downloader reuses existing covers. Delete a cover to download it again. Payload mode copies the image bytes unchanged and appends the encrypted file; there is no pixel-capacity calculation or need to choose a cover based on payload size.
+Existing samples are reused. Delete a sample to download it again.

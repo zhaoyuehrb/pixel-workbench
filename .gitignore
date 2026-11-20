@@ -22,5 +22,8 @@ examples/
 *.zip
 *.pdf
 
-# Sample wallpapers are part of the payload-mode branch.
+# Sample images
 !covers/*.jpg
+
+# Local notes
+USAGE.local.md

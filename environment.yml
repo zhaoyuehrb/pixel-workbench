@@ -1,4 +1,4 @@
-name: payload-vault
+name: image-workbench
 channels:
   - conda-forge
   - nodefaults

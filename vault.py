@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Append an encrypted file to a cover image, or recover its original bytes."""
+"""Local file utility."""
 import argparse
 from contextlib import contextmanager
 import getpass
@@ -16,10 +16,9 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
 
 MAGIC = b'PWPAYL01'
-FOOTER = struct.Struct('>8s16s12sQ')  # magic, salt, nonce, ciphertext + tag length
+FOOTER = struct.Struct('>8s16s12sQ')
 TAG_SIZE = 16
 CHUNK_SIZE = 1024 * 1024
-# NIST SP 800-38D's per-message limit for AES-GCM plaintext.
 MAX_PAYLOAD_SIZE = (1 << 36) - 32
 
 
@@ -58,7 +57,6 @@ def new_output(path):
 
 
 def encode(source, cover, output, password):
-    """Copy the cover verbatim, then append streamed AES-256-GCM ciphertext."""
     output = Path(output)
     if os.path.lexists(output):
         raise FileExistsError(f'Output already exists: {output}')
@@ -74,7 +72,7 @@ def encode(source, cover, output, password):
         image.seek(0)
         size = os.fstat(payload.fileno()).st_size
         if size > MAX_PAYLOAD_SIZE:
-            raise ValueError('Payload exceeds the AES-GCM limit (64 GiB minus 32 bytes).')
+            raise ValueError('Input exceeds the supported size limit.')
         salt, nonce = os.urandom(16), os.urandom(12)
         footer = FOOTER.pack(MAGIC, salt, nonce, size + TAG_SIZE)
         encryptor = Cipher(algorithms.AES(derive(password, salt)), modes.GCM(nonce)).encryptor()
@@ -96,21 +94,20 @@ def encode(source, cover, output, password):
 
 
 def decode(source, output, password):
-    """Locate the footer, authenticate the cover and payload, and recover bytes."""
     with open(source, 'rb') as image:
         total = os.fstat(image.fileno()).st_size
         if total < FOOTER.size + TAG_SIZE:
-            raise ValueError('No supported payload found.')
+            raise ValueError('No supported data found.')
         image.seek(-FOOTER.size, os.SEEK_END)
         footer = image.read(FOOTER.size)
         if len(footer) != FOOTER.size:
-            raise ValueError('Truncated payload footer.')
+            raise ValueError('Truncated file.')
         magic, salt, nonce, length = FOOTER.unpack(footer)
         if magic != MAGIC:
-            raise ValueError('No supported payload found. Pixel-mode images require the main branch.')
+            raise ValueError('No supported data found.')
         cover_size = total - FOOTER.size - length
         if length < TAG_SIZE or cover_size <= 0 or length - TAG_SIZE > MAX_PAYLOAD_SIZE:
-            raise ValueError('Invalid payload length or truncated file.')
+            raise ValueError('Invalid file length or truncated file.')
         image.seek(total - FOOTER.size - TAG_SIZE)
         tag = image.read(TAG_SIZE)
         decryptor = Cipher(algorithms.AES(derive(password, salt)), modes.GCM(nonce, tag)).decryptor()
@@ -131,11 +128,11 @@ def decode(source, output, password):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='command', required=True)
-    enc = commands.add_parser('encode', help='Append an encrypted file to a JPEG or PNG cover.')
+    enc = commands.add_parser('encode', help='Process a file.')
     enc.add_argument('file', type=Path)
     enc.add_argument('cover', type=Path)
     enc.add_argument('output', type=Path)
-    dec = commands.add_parser('decode', help='Recover original bytes from a payload-mode image.')
+    dec = commands.add_parser('decode', help='Restore a file.')
     dec.add_argument('image', type=Path)
     dec.add_argument('output', type=Path)
     args = parser.parse_args()
