@@ -1,0 +1,19 @@
+# Sample wallpapers
+
+Three 1920 × 1080 JPEG landscape wallpapers are included in this branch:
+
+| File | Photographer | Source |
+|---|---|---|
+| `alpine-lake.jpg` | Dominik Perau | [Pexels](https://www.pexels.com/photo/beautiful-landscape-of-a-mountain-lake-12699620/) |
+| `mountain-reflection.jpg` | Bri Schneiter | [Pexels](https://www.pexels.com/photo/calm-body-of-lake-between-mountains-346529/) |
+| `interlaken.jpg` | R. Fera | [Pexels](https://www.pexels.com/photo/scenic-view-of-lake-during-daytime-2618992/) |
+
+Downloaded and cropped through the Pexels image CDN. See the [Pexels license](https://www.pexels.com/license/), `sources.json` for exact download URLs, and `catalog.csv` for dimensions and file sizes. These are sample covers for the utility.
+
+```sh
+python covers.py download
+python vault.py encode /path/to/input.bin covers/alpine-lake.jpg packed.jpg
+python vault.py decode packed.jpg recovered.bin
+```
+
+The downloader reuses existing covers. Delete a cover to download it again. Payload mode copies the image bytes unchanged and appends the encrypted file; there is no pixel-capacity calculation or need to choose a cover based on payload size.
