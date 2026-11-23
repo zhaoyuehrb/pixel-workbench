@@ -135,13 +135,55 @@ def main():
     dec = commands.add_parser('decode', help='Restore a file.')
     dec.add_argument('image', type=Path)
     dec.add_argument('output', type=Path)
+    grouped = commands.add_parser('pack', help='Process a set.')
+    grouped.add_argument('file', type=Path)
+    grouped.add_argument('covers', type=Path)
+    grouped.add_argument('output', type=Path)
+    grouped.add_argument('--max-bytes', type=int, default=950_000_000)
+    grouped.add_argument('--name')
+    restore = commands.add_parser('unpack', help='Restore available sets.')
+    restore.add_argument('input', type=Path)
+    restore.add_argument('output', type=Path)
+    listing = commands.add_parser('inspect', help='List available sets.')
+    listing.add_argument('input', type=Path)
     args = parser.parse_args()
     try:
+        if args.command == 'inspect':
+            import batch
+            groups, issues = batch.scan(args.input)
+            if not groups:
+                issues.append('No supported sets found.')
+            for group in groups:
+                metadata = group.metadata
+                state = 'complete' if group.complete else 'incomplete'
+                print(f'{metadata["name"]} [{metadata["id"]}]: {len(group.parts)}/{metadata["count"]} parts, {state}')
+                if group.missing:
+                    issues.append(f'{metadata["name"]} [{metadata["id"]}]: Missing parts: {batch.missing_text(group)}')
+                issues.extend(group.problems)
+            for issue in issues:
+                print(f'Error: {issue}', file=sys.stderr)
+            return 1 if issues else 0
         password = getpass.getpass('Passphrase: ')
-        if args.command == 'encode':
+        if args.command in {'encode', 'pack'}:
             if password != getpass.getpass('Confirm passphrase: '):
                 raise ValueError('Passphrases do not match.')
-            encode(args.file, args.cover, args.output, password)
+            if args.command == 'encode':
+                encode(args.file, args.cover, args.output, password)
+            else:
+                import batch
+                result = batch.pack(args.file, args.covers, args.output, password,
+                                    max_bytes=args.max_bytes, name=args.name)
+                for path in result['parts']:
+                    print(f'Saved {path}')
+                return 0
+        elif args.command == 'unpack':
+            import batch
+            result = batch.unpack(args.input, args.output, password)
+            for item in result['restored']:
+                print(f'Saved {item["output"]}')
+            for issue in result['issues']:
+                print(f'Error: {issue}', file=sys.stderr)
+            return 1 if result['issues'] else 0
         else:
             decode(args.image, args.output, password)
     except (OSError, ValueError) as error:
