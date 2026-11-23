@@ -15,7 +15,11 @@ conda env create -f environment.yml
 conda activate image-workbench
 ```
 
-Sample images and source credits are in `covers/`.
+## Command reference
+
+```sh
+python vault.py --help
+```
 
 ## Tests
 

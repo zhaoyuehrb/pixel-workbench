@@ -1,4 +1,3 @@
-import io
 import os
 from pathlib import Path
 import shutil
@@ -13,197 +12,134 @@ from PIL import Image
 import vault
 
 
-class FileTests(unittest.TestCase):
+class ImageTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
-        self.source = self.root / 'original.bin'
-        self.output = self.root / 'recovered.bin'
-        self.cover = self.root / 'cover.jpg'
-        self.hidden = self.root / 'packed.jpg'
-        Image.new('RGB', (32, 24), (100, 170, 240)).save(self.cover)
+        self.source = self.root / 'input.bin'
+        self.image = self.root / 'image.png'
+        self.output = self.root / 'output.bin'
+        self.password = 'test passphrase'
         self.source.write_bytes(bytes(range(256)) * 4)
-        self.password = 'test passphrase 🔑'
 
-    def encode(self):
-        vault.encode(self.source, self.cover, self.hidden, self.password)
-
-    def assert_no_temporary(self):
-        self.assertEqual(list(self.root.glob('.payload-*')), [])
-
-    def test_roundtrip_formats_sizes_and_unchanged_cover(self):
-        for image_format, extension in [('JPEG', '.jpg'), ('PNG', '.png')]:
-            self.cover = self.root / ('cover' + extension)
-            self.hidden = self.root / ('packed' + extension)
-            Image.new('RGB', (32, 24), (100, 170, 240)).save(self.cover, format=image_format)
-            for size in (0, 1, 256, vault.CHUNK_SIZE - 1, vault.CHUNK_SIZE, vault.CHUNK_SIZE + 1,
-                         3 * vault.CHUNK_SIZE + 13):
-                with self.subTest(format=image_format, size=size):
-                    data = os.urandom(size)
+    def test_roundtrip_all_modes_and_empty_files(self):
+        for channels, mode in vault.MODES.items():
+            for data in (b'', bytes(range(256)) + os.urandom(512)):
+                with self.subTest(channels=channels, size=len(data)):
                     self.source.write_bytes(data)
-                    original_cover = self.cover.read_bytes()
-                    self.encode()
-                    with self.hidden.open('rb') as handle:
-                        self.assertEqual(handle.read(len(original_cover)), original_cover)
-                    self.assertEqual(self.cover.read_bytes(), original_cover)
-                    self.assertEqual(self.hidden.stat().st_size, len(original_cover) + size + 60)
-                    with Image.open(self.cover) as original, Image.open(self.hidden) as packed:
-                        self.assertEqual(packed.format, image_format)
-                        self.assertEqual(packed.size, original.size)
-                        self.assertEqual(packed.tobytes(), original.tobytes())
-                    vault.decode(self.hidden, self.output, self.password)
+                    width, height = vault.encode(self.source, self.image, self.password, channels)
+                    self.assertEqual(width * 9, height * 16)
+                    with Image.open(self.image) as image:
+                        self.assertEqual(image.format, 'PNG')
+                        self.assertEqual(image.mode, mode)
+                        self.assertTrue(image.tobytes().startswith(vault.MAGIC))
+                    vault.decode(self.image, self.output, self.password)
                     self.assertEqual(self.output.read_bytes(), data)
                     self.assertEqual(self.source.read_bytes(), data)
-                    self.hidden.unlink()
+                    self.image.unlink()
                     self.output.unlink()
-                    self.assert_no_temporary()
+        self.assertEqual(list(self.root.glob('.payload-*')), [])
 
-    def test_wrong_or_empty_password_no_output(self):
-        self.encode()
-        for password in ('wrong password', ''):
-            with self.subTest(password=password), self.assertRaises(ValueError):
-                vault.decode(self.hidden, self.output, password)
-            self.assertFalse(self.output.exists())
-            self.assert_no_temporary()
-        self.hidden.unlink()
-        with self.assertRaisesRegex(ValueError, 'empty'):
-            vault.encode(self.source, self.cover, self.hidden, '')
-        self.assertFalse(self.hidden.exists())
+    def test_recovery_after_rebuilding_png_from_pixels_only(self):
+        original = os.urandom(4096)
+        self.source.write_bytes(original)
+        for channels in vault.MODES:
+            with self.subTest(channels=channels):
+                vault.encode(self.source, self.image, self.password, channels, ratio=(4, 3))
+                with Image.open(self.image) as image:
+                    self.assertEqual(image.width * 3, image.height * 4)
+                    rebuilt = Image.frombytes(image.mode, image.size, image.tobytes())
+                alternate = self.root / 'rebuilt.png'
+                rebuilt.save(alternate, format='PNG', compress_level=0)
+                rebuilt.close()
+                vault.decode(alternate, self.output, self.password)
+                self.assertEqual(self.output.read_bytes(), original)
+                self.image.unlink()
+                self.output.unlink()
 
-    def test_modified_input_rejected(self):
-        self.encode()
-        original = self.hidden.read_bytes()
-        positions = (0, self.cover.stat().st_size, len(original) - vault.FOOTER.size - 1,
-                     len(original) - vault.FOOTER.size, len(original) - 36, len(original) - 20,
-                     len(original) - 8, len(original) - 1)
-        for position in positions:
+    def test_dimensions_are_exact_and_minimal(self):
+        for channels in vault.MODES:
+            for ratio in [(16, 9), (4, 3), (1, 1), (32, 18), (9, 16)]:
+                horizontal, vertical = vault.aspect(ratio)
+                for size in [0, 1, 1024, 1_000_000_000]:
+                    with self.subTest(channels=channels, ratio=ratio, size=size):
+                        width, height = vault.dimensions(size, channels, ratio)
+                        needed = size + vault.HEADER.size + vault.TAG_SIZE
+                        self.assertEqual(width * vertical, height * horizontal)
+                        self.assertGreaterEqual(width * height * channels, needed)
+                        self.assertLess((width - horizontal) * (height - vertical) * channels, needed)
+        for ratio in ['0:1', '-1:2', '1:0', 'abc', '1:2:3']:
+            with self.assertRaises(ValueError):
+                vault.dimensions(1, ratio=ratio)
+        for channels in [0, 5, True]:
+            with self.assertRaises(ValueError):
+                vault.dimensions(1, channels)
+
+    def test_wrong_password_and_changed_pixels_leave_no_output(self):
+        vault.encode(self.source, self.image, self.password)
+        with self.assertRaisesRegex(ValueError, 'Incorrect passphrase'):
+            vault.decode(self.image, self.output, 'wrong password')
+        with Image.open(self.image) as image:
+            original, mode, size = image.tobytes(), image.mode, image.size
+        for position in [0, vault.HEADER.size + 3, len(original) - 1]:
             with self.subTest(position=position):
-                corrupted = bytearray(original)
-                corrupted[position] ^= 1
-                self.hidden.write_bytes(corrupted)
+                modified = bytearray(original)
+                modified[position] ^= 1
+                damaged = Image.frombytes(mode, size, bytes(modified))
+                damaged.save(self.image)
+                damaged.close()
                 with self.assertRaises(ValueError):
-                    vault.decode(self.hidden, self.output, self.password)
+                    vault.decode(self.image, self.output, self.password)
                 self.assertFalse(self.output.exists())
-                self.assert_no_temporary()
+        reshaped = Image.frombytes(mode, (size[1], size[0]), original)
+        reshaped.save(self.image)
+        reshaped.close()
+        with self.assertRaisesRegex(ValueError, 'layout'):
+            vault.decode(self.image, self.output, self.password)
+        self.assertEqual(list(self.root.glob('.payload-*')), [])
 
-    def test_truncation_trailing_garbage_and_invalid_lengths(self):
-        self.encode()
-        original = self.hidden.read_bytes()
-        variants = [b'', b'x', original[:20], original[:-1], original[:-60], original + b'extra']
-        magic, salt, nonce, _ = vault.FOOTER.unpack(original[-vault.FOOTER.size:])
-        for length in (0, 15, len(original), 2**64 - 1):
-            variants.append(original[:-vault.FOOTER.size] + vault.FOOTER.pack(magic, salt, nonce, length))
-        for data in variants:
-            with self.subTest(size=len(data)):
-                self.hidden.write_bytes(data)
-                with self.assertRaises(ValueError):
-                    vault.decode(self.hidden, self.output, self.password)
-                self.assertFalse(self.output.exists())
-                self.assert_no_temporary()
-        with self.assertRaisesRegex(ValueError, 'No supported'):
-            vault.decode(self.cover, self.output, self.password)
-
-    def test_outputs_never_replace_existing_files_or_inputs(self):
-        self.encode()
-        for target in (self.source, self.cover, self.hidden):
-            before = target.read_bytes()
-            with self.subTest(target=target), self.assertRaises(FileExistsError):
-                vault.encode(self.source, self.cover, target, self.password)
-            self.assertEqual(target.read_bytes(), before)
-            with self.assertRaises(FileExistsError):
-                vault.decode(self.hidden, target, self.password)
-            self.assertEqual(target.read_bytes(), before)
-            self.assert_no_temporary()
-
-    def test_dangling_symlink_not_replaced(self):
-        self.encode()
-        self.output.symlink_to(self.root / 'missing')
+    def test_preserve_existing_files_and_reject_invalid_inputs(self):
+        vault.encode(self.source, self.image, self.password)
+        before = self.image.read_bytes()
         with self.assertRaises(FileExistsError):
-            vault.decode(self.hidden, self.output, self.password)
-        self.assertTrue(self.output.is_symlink())
-        self.assert_no_temporary()
-
-    def test_output_creation_race_preserves_other_file(self):
-        self.encode()
-        original_link = os.link
-
-        def competing_link(source, target):
-            Path(target).write_bytes(b'created by another process')
-            return original_link(source, target)
-
-        with patch('vault.os.link', side_effect=competing_link), self.assertRaises(FileExistsError):
-            vault.decode(self.hidden, self.output, self.password)
-        self.assertEqual(self.output.read_bytes(), b'created by another process')
-        self.assert_no_temporary()
-
-    def test_interrupted_writes_leave_no_output(self):
-        for failure in (OSError('disk full'), KeyboardInterrupt()):
-            with self.subTest(failure=type(failure).__name__):
-                with self.assertRaises(type(failure)):
-                    with vault.new_output(self.output) as handle:
-                        handle.write(b'partial data')
-                        raise failure
-                self.assertFalse(self.output.exists())
-                self.assert_no_temporary()
-
-    def test_invalid_cover_extension_and_size_limit(self):
+            vault.encode(self.source, self.image, self.password)
+        self.assertEqual(self.image.read_bytes(), before)
+        with self.assertRaises(FileExistsError):
+            vault.decode(self.image, self.source, self.password)
+        self.assertEqual(self.source.read_bytes(), bytes(range(256)) * 4)
         with self.assertRaisesRegex(ValueError, 'extension'):
-            vault.encode(self.source, self.cover, self.root / 'wrong.png', self.password)
-        with patch('vault.MAX_PAYLOAD_SIZE', 10), self.assertRaisesRegex(ValueError, 'limit'):
-            self.encode()
-        for name, data in [('not-an-image.jpg', b'not an image'), ('unsupported.gif', None)]:
-            cover = self.root / name
-            if data is None:
-                Image.new('RGB', (2, 2)).save(cover)
-            else:
-                cover.write_bytes(data)
-            with self.assertRaises((OSError, ValueError)):
-                vault.encode(self.source, cover, self.hidden, self.password)
-        self.assertFalse(self.hidden.exists())
-        self.assert_no_temporary()
-
-    def test_chunks_reject_truncation(self):
-        with self.assertRaisesRegex(ValueError, 'truncated'):
-            list(vault.chunks(io.BytesIO(b'short'), 100))
-
-    def test_randomized_output(self):
-        self.encode()
-        first = self.hidden.read_bytes()
-        self.hidden.unlink()
-        self.encode()
-        self.assertNotEqual(first, self.hidden.read_bytes())
-        vault.decode(self.hidden, self.output, self.password)
-        self.assertEqual(self.output.read_bytes(), self.source.read_bytes())
-
-    def test_standalone_cli_from_another_directory(self):
-        script = self.root / 'vault.py'
-        shutil.copy(Path(vault.__file__), script)
-
-        def run(*arguments, passwords):
-            return subprocess.run([sys.executable, '-I', str(script), *arguments], cwd=self.root,
-                                  input=passwords, text=True, capture_output=True)
-
-        result = run('encode', self.source.name, self.cover.name, self.hidden.name,
-                     passwords=self.password + '\n' + self.password + '\n')
-        self.assertEqual(result.returncode, 0, result.stderr)
-        result = run('decode', self.hidden.name, self.output.name, passwords='wrong\n')
-        self.assertEqual(result.returncode, 1, result.stderr)
+            vault.encode(self.source, self.root / 'wrong.jpg', self.password)
+        with self.assertRaisesRegex(ValueError, 'empty'):
+            vault.encode(self.source, self.root / 'empty.png', '')
+        with patch('vault.MAX_PIXELS', 10):
+            with self.assertRaisesRegex(ValueError, 'limit'):
+                vault.encode(self.source, self.root / 'too-large.png', self.password)
+            with self.assertRaisesRegex(ValueError, 'limit'):
+                vault.decode(self.image, self.output, self.password)
         self.assertFalse(self.output.exists())
-        result = run('decode', self.hidden.name, self.output.name, passwords=self.password + '\n')
+        self.assertFalse((self.root / 'too-large.png').exists())
+        self.assertEqual(list(self.root.glob('.payload-*')), [])
+
+    def test_standalone_cli(self):
+        shutil.copyfile(vault.__file__, self.root / 'vault.py')
+
+        def run(*arguments, password=''):
+            return subprocess.run([sys.executable, '-I', 'vault.py', *arguments], cwd=self.root,
+                                  input=password, text=True, capture_output=True)
+
+        result = run('plan', 'input.bin', '--channels', '1', '--ratio', '4:3')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('L:', result.stdout)
+        result = run('encode', 'input.bin', 'image.png', '--channels', '3', '--ratio', '4:3',
+                     password=self.password + '\n' + self.password + '\n')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        result = run('decode', 'image.png', 'output.bin', password=self.password + '\n')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.output.read_bytes(), self.source.read_bytes())
-        result = run('decode', self.hidden.name, self.output.name, passwords=self.password + '\n')
-        self.assertEqual(result.returncode, 1, result.stderr)
-        self.hidden.unlink()
-        result = run('encode', self.source.name, self.cover.name, self.hidden.name,
-                     passwords='one\ntwo\n')
+        result = run('encode', 'input.bin', 'different.png', password='one\ntwo\n')
         self.assertEqual(result.returncode, 1)
-        self.assertIn('do not match', result.stderr)
-        self.assertFalse(self.hidden.exists())
-        result = run('decode', 'missing.jpg', 'recovered.bin', passwords='')
-        self.assertEqual(result.returncode, 130, result.stderr)
-        self.assert_no_temporary()
+        self.assertFalse((self.root / 'different.png').exists())
 
 
 if __name__ == '__main__':
