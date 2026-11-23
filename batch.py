@@ -289,7 +289,10 @@ def recover(group, password, destination, progress=None):
                     pass
             else:
                 raise ValueError(f'No valid copy of part {index + 1}.')
-        _read(selected, key, write)
+        try:
+            _read(selected, key, write)
+        except (OSError, ValueError) as error:
+            raise ValueError(f'Part {index + 1} ({selected.path.name}): {error}') from None
     if done != metadata['size'] or digest.hexdigest() != metadata['sha256']:
         raise ValueError('Recovered file checksum does not match.')
     return digest.hexdigest()

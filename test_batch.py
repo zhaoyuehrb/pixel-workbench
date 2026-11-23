@@ -170,6 +170,7 @@ class BatchTests(unittest.TestCase):
                 path.write_bytes(raw)
                 result = batch.unpack(self.images, self.output, self.password)
                 self.assertTrue(result['issues'])
+                self.assertTrue(any('Part 1' in issue and path.name in issue for issue in result['issues']))
                 self.assertFalse(self.restored(packed).exists())
                 self.assert_clean()
         path.write_bytes(original)
